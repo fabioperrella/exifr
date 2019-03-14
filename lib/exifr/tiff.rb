@@ -475,10 +475,10 @@ module EXIFR
     end
 
     class IFD # :nodoc:
-      attr_reader :type, :fields, :offset
+      attr_reader :type, :raw_fields, :mapped_fields, :offset
 
       def initialize(data, offset = nil, type = :image)
-        @data, @offset, @type, @fields = data, offset, type, {}
+        @data, @offset, @type, @raw_fields, @mapped_fields = data, offset, type, {}, {}
 
         pos = offset || @data.readlong(4)
         num = @data.readshort(pos)
@@ -504,7 +504,7 @@ module EXIFR
       def height; image_length; end
 
       def to_hash
-        @hash ||= @fields.map do |key,value|
+        @hash ||= @mapped_fields.map do |key,value|
           if value.nil?
             {}
           elsif IFD_TAGS.include?(key)
@@ -528,24 +528,25 @@ module EXIFR
       end
 
       def encode_with(coder)
-        coder["fields"] = @fields
+        coder["mapped_fields"] = @mapped_fields
       end
 
       def to_yaml_properties
-        ['@fields']
+        ['@mapped_fields']
       end
 
     private
       def add_field(field)
-        return unless tag = TAG_MAPPING[@type][field.tag]
-        return if @fields[tag]
+        return if @raw_fields.include?(field.tag) # first encountered value wins
+        @raw_fields[field.tag] = field.value
 
-        if IFD_TAGS.include? tag
-          @fields[tag] = IFD.new(@data, field.offset, tag)
-        else
-          value = ADAPTERS[tag][field.value]
-          @fields[tag] = value.kind_of?(Array) && value.size == 1 ? value.first : value
-        end
+        return unless tag = TAG_MAPPING[@type][field.tag]
+        @mapped_fields[tag] = if IFD_TAGS.include?(tag)
+                                IFD.new(@data, field.offset, tag)
+                              else
+                                value = ADAPTERS[tag][field.value]
+                                value.kind_of?(Array) && value.size == 1 ? value.first : value
+                              end
       end
     end
 
